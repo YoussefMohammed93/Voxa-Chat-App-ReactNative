@@ -1,26 +1,56 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
+// Primary colors (pulled from Figma “Primary / 500” and “Primary / 700” styles)
+const primaryColor = "#385FFF";
+const primaryColorDark = "#375FFF";
 
-const tintColorLight = "#0a7ea4";
-const tintColorDark = "#fff";
+// Accent colors (e.g. “Accent / Light” & “Accent / Dark”)
+const accentColorLight = "#FF6B6B";
+const accentColorDark = "#E55A5A";
+
+// Text colors (e.g. “Text / Primary” & “Text / Inverse”)
+const textColorLight = "#000000";
+const textColorDark = "#FFFFFF";
+
+// Background colors (e.g. “Surface / Light Background” & “Surface / Dark Background”)
+const backgroundColorLight = "#385FFF";
+const backgroundColorDark = "#152033";
+
+// Surface colors (e.g. cards, panels — usually “Surface / Primary”)
+const surfaceColorLight = "#FFFFFF";
+const surfaceColorDark = "#161616";
 
 export const Colors = {
   light: {
-    text: "#11181C",
-    background: "#fff",
-    tint: tintColorLight,
-    icon: "#687076",
-    tabIconDefault: "#687076",
-    tabIconSelected: tintColorLight,
+    primary: primaryColor,
+    accent: accentColorLight,
+    text: textColorLight,
+    background: backgroundColorLight,
+    surface: surfaceColorLight,
+
+    border: "#E0E0E0",
+    icon: "#555555",
+    tabIconDefault: "#AAAAAA",
+    tabIconSelected: primaryColor,
+
+    success: "#4CAF50",
+    warning: "#FFC107",
+    error: "#F44336",
+    info: "#2196F3",
   },
   dark: {
-    text: "#ECEDEE",
-    background: "#151718",
-    tint: tintColorDark,
-    icon: "#9BA1A6",
-    tabIconDefault: "#9BA1A6",
-    tabIconSelected: tintColorDark,
+    primary: primaryColorDark,
+    accent: accentColorDark,
+    text: textColorDark,
+    background: backgroundColorDark,
+    surface: surfaceColorDark,
+
+    border: "#333333",
+    icon: "#BBBBBB",
+    tabIconDefault: "#888888",
+    tabIconSelected: primaryColorDark,
+
+    success: "#2CC069",
+    warning: "#FDCF41",
+    error: "#E94242",
+    info: "#7BCBCF",
   },
 };

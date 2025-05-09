@@ -22,14 +22,25 @@ export default function RootLayout() {
   });
 
   if (!loaded) {
-    // Async font loading only occurs in development.
     return null;
   }
 
   return (
     <ConvexProvider client={convex}>
       <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-        <Stack>
+        <Stack
+          screenOptions={{
+            headerStyle: {
+              backgroundColor: colorScheme === "dark" ? "#121212" : "#FFFFFF",
+            },
+            headerTintColor: colorScheme === "dark" ? "#FFFFFF" : "#000000",
+          }}
+        >
+          <Stack.Screen name="walkthrough" options={{ headerShown: false }} />
+          <Stack.Screen name="verification" />
+          <Stack.Screen name="verification-code" />
+          <Stack.Screen name="profile" />
+          <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="+not-found" />
         </Stack>
         <StatusBar style="auto" />

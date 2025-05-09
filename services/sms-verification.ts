@@ -1,0 +1,173 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SMS from "expo-sms";
+
+// Storage key prefix for verification codes
+const VERIFICATION_CODE_PREFIX = "verification_code_";
+
+/**
+ * Generate a random 6-digit verification code
+ * @returns A 6-digit verification code as a string
+ */
+
+export const generateVerificationCode = (): string => {
+  // Generate a random 6-digit number
+  return Math.floor(1000 + Math.random() * 9000).toString();
+};
+
+/**
+ * Save a verification code for a phone number
+ * @param phoneNumber The phone number to save the code for
+ * @param countryCode The country code for the phone number
+ * @param code The verification code to save
+ */
+
+export const saveVerificationCode = async (
+  phoneNumber: string,
+  countryCode: string,
+  code: string
+): Promise<void> => {
+  try {
+    const fullNumber = `${countryCode}${phoneNumber}`;
+    const key = `${VERIFICATION_CODE_PREFIX}${fullNumber}`;
+
+    // Save the code with an expiration time (5 minutes from now)
+    const expirationTime = Date.now() + 5 * 60 * 1000; // 5 minutes
+    const data = {
+      code,
+      expirationTime,
+    };
+
+    await AsyncStorage.setItem(key, JSON.stringify(data));
+    console.log(`Saved verification code ${code} for ${fullNumber}`);
+  } catch (error) {
+    console.error("Error saving verification code:", error);
+    throw error;
+  }
+};
+
+/**
+ * Verify a code for a phone number
+ * @param phoneNumber The phone number to verify the code for
+ * @param countryCode The country code for the phone number
+ * @param code The verification code to verify
+ * @returns True if the code is valid, false otherwise
+ */
+
+export const verifyCode = async (
+  phoneNumber: string,
+  countryCode: string,
+  code: string
+): Promise<boolean> => {
+  try {
+    const fullNumber = `${countryCode}${phoneNumber}`;
+    const key = `${VERIFICATION_CODE_PREFIX}${fullNumber}`;
+
+    const storedDataString = await AsyncStorage.getItem(key);
+    if (!storedDataString) {
+      console.log(`No verification code found for ${fullNumber}`);
+      return false;
+    }
+
+    const storedData = JSON.parse(storedDataString);
+    const { code: storedCode, expirationTime } = storedData;
+
+    // Check if the code has expired
+    if (Date.now() > expirationTime) {
+      console.log(`Verification code for ${fullNumber} has expired`);
+      // Remove expired code
+      await AsyncStorage.removeItem(key);
+      return false;
+    }
+
+    // Check if the code matches
+    const isValid = storedCode === code;
+
+    console.log(
+      `Verification result for ${fullNumber}: ${isValid ? "Valid" : "Invalid"}`
+    );
+
+    // If valid, remove the code from storage
+    if (isValid) {
+      await AsyncStorage.removeItem(key);
+    }
+
+    return isValid;
+  } catch (error) {
+    console.error("Error verifying code:", error);
+    return false;
+  }
+};
+
+/**
+ * Check if SMS is available on the device
+ * @returns A promise that resolves to a boolean indicating if SMS is available
+ */
+
+export const isSMSAvailable = async (): Promise<boolean> => {
+  const isAvailable = await SMS.isAvailableAsync();
+  return isAvailable;
+};
+
+/**
+ * Send an SMS message using the device's native SMS app
+ * @param to The phone number to send the message to (with country code)
+ * @param body The message body
+ * @returns A promise that resolves when the SMS app is opened
+ */
+
+export const sendSMS = async (
+  to: string,
+  body: string
+): Promise<{ result: string }> => {
+  try {
+    // Format the phone number to E.164 format if it's not already
+    const formattedTo = to.startsWith("+") ? to : `+${to}`;
+
+    // Check if SMS is available
+    const isAvailable = await isSMSAvailable();
+    if (!isAvailable) {
+      throw new Error("SMS is not available on this device");
+    }
+
+    // Open the SMS app with the message
+    const result = await SMS.sendSMSAsync([formattedTo], body);
+    return result;
+  } catch (error) {
+    console.error("Error sending SMS:", error);
+    throw error;
+  }
+};
+
+/**
+ * Send a verification code via SMS
+ * @param phoneNumber The phone number to send the code to
+ * @param countryCode The country code for the phone number
+ * @returns A promise that resolves with the generated code and SMS result
+ */
+
+export const sendVerificationSMS = async (
+  phoneNumber: string,
+  countryCode: string
+): Promise<{ code: string; result: string }> => {
+  try {
+    // Generate a verification code
+    const code = generateVerificationCode();
+
+    // Format the phone number
+    const to = `${countryCode}${phoneNumber}`;
+
+    // Create the message body
+    const body = `Your Voxa Chat verification code is: ${code}`;
+
+    // Save the verification code
+    await saveVerificationCode(phoneNumber, countryCode, code);
+
+    // Send the SMS
+    const result = await sendSMS(to, body);
+
+    return { code, result: result.result };
+  } catch (error) {
+    console.error("Error sending verification SMS:", error);
+    throw error;
+  }
+};
