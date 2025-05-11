@@ -43,7 +43,7 @@ export const Colors = {
     background: backgroundColorDark,
     surface: surfaceColorDark,
 
-    border: "#333333",
+    border: "#222222",
     icon: "#BBBBBB",
     tabIconDefault: "#888888",
     tabIconSelected: primaryColorDark,
