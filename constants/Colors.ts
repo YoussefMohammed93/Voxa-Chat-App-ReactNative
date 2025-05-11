@@ -12,7 +12,7 @@ const textColorDark = "#FFFFFF";
 
 // Background colors (e.g. “Surface / Light Background” & “Surface / Dark Background”)
 const backgroundColorLight = "#385FFF";
-const backgroundColorDark = "#152033";
+const backgroundColorDark = "#131313";
 
 // Surface colors (e.g. cards, panels — usually “Surface / Primary”)
 const surfaceColorLight = "#FFFFFF";

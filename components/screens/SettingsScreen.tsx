@@ -3,6 +3,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { Colors } from "@/constants/Colors";
 import { useColorScheme } from "@/hooks/useColorScheme";
 import { MaterialIcons } from "@expo/vector-icons";
+import { router } from "expo-router";
 import React from "react";
 import { StyleSheet, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -36,8 +37,26 @@ function SettingsItem({ icon, title, onPress }: SettingsItemProps) {
 }
 
 export function SettingsScreen() {
+  const colorScheme = useColorScheme() ?? "light";
+  const colors = Colors[colorScheme];
+
   const handleSettingsPress = (setting: string) => {
-    console.log(`${setting} pressed`);
+    switch (setting) {
+      case "Profile":
+        router.push("/ProfileSettingsScreen");
+        break;
+      case "Notifications":
+        router.push("/NotificationsSettingsScreen");
+        break;
+      case "Theme":
+        router.push("/ThemeSettingsScreen");
+        break;
+      case "About":
+        router.push("/AboutScreen");
+        break;
+      default:
+        console.log(`${setting} pressed`);
+    }
   };
 
   return (
@@ -47,13 +66,18 @@ export function SettingsScreen() {
       darkColor={Colors.dark.background}
     >
       <SafeAreaView style={styles.safeArea}>
-        <View style={styles.header}>
+        <View style={[styles.header, { borderBottomColor: colors.border }]}>
           <ThemedText type="title" style={styles.headerTitle}>
             Settings
           </ThemedText>
         </View>
 
-        <View style={styles.settingsSection}>
+        <View
+          style={[
+            styles.settingsSection,
+            { borderBottomColor: colors.border, borderBottomWidth: 1 },
+          ]}
+        >
           <ThemedText
             style={styles.sectionTitle}
             lightColor={Colors.light.tabIconDefault}
@@ -71,14 +95,15 @@ export function SettingsScreen() {
             title="Notifications"
             onPress={() => handleSettingsPress("Notifications")}
           />
-          <SettingsItem
-            icon="lock"
-            title="Privacy"
-            onPress={() => handleSettingsPress("Privacy")}
-          />
         </View>
 
-        <View style={styles.settingsSection}>
+        <View
+          style={[
+            styles.settingsSection,
+            { borderBottomColor: colors.border },
+            { borderBottomWidth: 1 },
+          ]}
+        >
           <ThemedText
             style={styles.sectionTitle}
             lightColor={Colors.light.tabIconDefault}
@@ -91,11 +116,6 @@ export function SettingsScreen() {
             title="Theme"
             onPress={() => handleSettingsPress("Theme")}
           />
-          <SettingsItem
-            icon="chat-bubble"
-            title="Chat Wallpaper"
-            onPress={() => handleSettingsPress("Chat Wallpaper")}
-          />
         </View>
 
         <View style={styles.settingsSection}>
@@ -106,11 +126,6 @@ export function SettingsScreen() {
           >
             Support
           </ThemedText>
-          <SettingsItem
-            icon="help"
-            title="Help Center"
-            onPress={() => handleSettingsPress("Help Center")}
-          />
           <SettingsItem
             icon="info"
             title="About"
@@ -136,7 +151,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(0, 0, 0, 0.05)",
   },
   headerTitle: {
     fontSize: 28,

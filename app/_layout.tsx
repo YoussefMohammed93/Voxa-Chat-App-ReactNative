@@ -1,7 +1,8 @@
+import { ThemeProvider } from "@/contexts/ThemeContext";
 import {
   DarkTheme,
   DefaultTheme,
-  ThemeProvider,
+  ThemeProvider as NavigationThemeProvider,
 } from "@react-navigation/native";
 import { ConvexProvider, ConvexReactClient } from "convex/react";
 import { useFonts } from "expo-font";
@@ -17,7 +18,6 @@ const convex = new ConvexReactClient(process.env.EXPO_PUBLIC_CONVEX_URL!, {
 });
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
   const [loaded] = useFonts({
     SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
   });
@@ -28,26 +28,51 @@ export default function RootLayout() {
 
   return (
     <ConvexProvider client={convex}>
-      <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-        <Stack
-          screenOptions={{
-            headerStyle: {
-              backgroundColor: colorScheme === "dark" ? "#121212" : "#FFFFFF",
-            },
-            headerTintColor: colorScheme === "dark" ? "#FFFFFF" : "#000000",
-          }}
-        >
-          <Stack.Screen name="walkthrough" options={{ headerShown: false }} />
-          <Stack.Screen name="verification" />
-          <Stack.Screen name="verification-code" />
-          <Stack.Screen name="profile" />
-          <Stack.Screen name="index" options={{ headerShown: false }} />
-          <Stack.Screen name="ChatScreen" options={{ headerShown: false }} />
-          <Stack.Screen name="ProfileScreen" options={{ headerShown: false }} />
-          <Stack.Screen name="+not-found" />
-        </Stack>
-        <StatusBar style="auto" />
+      <ThemeProvider>
+        <AppWithTheme />
       </ThemeProvider>
     </ConvexProvider>
+  );
+}
+
+function AppWithTheme() {
+  const colorScheme = useColorScheme();
+
+  return (
+    <NavigationThemeProvider
+      value={colorScheme === "dark" ? DarkTheme : DefaultTheme}
+    >
+      <Stack
+        screenOptions={{
+          headerStyle: {
+            backgroundColor: colorScheme === "dark" ? "#121212" : "#FFFFFF",
+          },
+          headerTintColor: colorScheme === "dark" ? "#FFFFFF" : "#000000",
+        }}
+      >
+        <Stack.Screen name="walkthrough" options={{ headerShown: false }} />
+        <Stack.Screen name="verification" />
+        <Stack.Screen name="verification-code" />
+        <Stack.Screen name="profile" />
+        <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen name="ChatScreen" options={{ headerShown: false }} />
+        <Stack.Screen name="ProfileScreen" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="ProfileSettingsScreen"
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="NotificationsSettingsScreen"
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="ThemeSettingsScreen"
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen name="AboutScreen" options={{ headerShown: false }} />
+        <Stack.Screen name="+not-found" />
+      </Stack>
+      <StatusBar style="auto" />
+    </NavigationThemeProvider>
   );
 }

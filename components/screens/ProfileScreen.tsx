@@ -114,7 +114,9 @@ export function ProfileScreen() {
         </View>
 
         {/* User Profile Section */}
-        <View style={styles.profileSection}>
+        <View
+          style={[styles.profileSection, { borderBottomColor: colors.border }]}
+        >
           <TouchableOpacity
             onPress={openProfileImageViewer}
             activeOpacity={0.9}

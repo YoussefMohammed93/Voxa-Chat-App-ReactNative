@@ -65,13 +65,15 @@ export function ChatsScreen() {
       darkColor={Colors.dark.background}
     >
       <SafeAreaView style={styles.safeArea}>
-        <View style={styles.header}>
+        <View style={[styles.header, { borderBottomColor: colors.border }]}>
           <ThemedText type="title" style={styles.headerTitle}>
             Chats
           </ThemedText>
         </View>
 
-        <View style={styles.searchContainer}>
+        <View
+          style={[styles.searchContainer, { borderBottomColor: colors.border }]}
+        >
           <View
             style={[
               styles.searchInputContainer,
@@ -103,9 +105,7 @@ export function ChatsScreen() {
               ]}
               placeholder="Search chats..."
               placeholderTextColor={
-                colorScheme === "dark"
-                  ? colors.tabIconDefault
-                  : colors.tabIconDefault
+                colorScheme === "dark" ? colors.icon : colors.tabIconDefault
               }
               value={searchText}
               onChangeText={(text) => setSearchText(text)}
@@ -116,9 +116,7 @@ export function ChatsScreen() {
                   name="close"
                   size={24}
                   color={
-                    colorScheme === "dark"
-                      ? colors.tabIconDefault
-                      : colors.tabIconDefault
+                    colorScheme === "dark" ? colors.icon : colors.tabIconDefault
                   }
                 />
               </TouchableOpacity>
@@ -133,7 +131,6 @@ export function ChatsScreen() {
             <ChatRow user={item} onPress={handleChatPress} />
           )}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.listContent}
         />
       </SafeAreaView>
     </ThemedView>
@@ -154,7 +151,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(0, 0, 0, 0.05)",
   },
   headerTitle: {
     fontSize: 28,
@@ -172,7 +168,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(0, 0, 0, 0.05)",
     marginBottom: 4,
   },
   searchInputContainer: {
@@ -191,8 +186,5 @@ const styles = StyleSheet.create({
     height: 40,
     fontSize: 16,
     paddingVertical: 0,
-  },
-  listContent: {
-    paddingBottom: 20,
   },
 });

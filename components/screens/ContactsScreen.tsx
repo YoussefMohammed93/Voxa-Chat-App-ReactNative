@@ -115,7 +115,7 @@ export function ContactsScreen() {
       darkColor={Colors.dark.background}
     >
       <SafeAreaView style={styles.safeArea}>
-        <View style={styles.header}>
+        <View style={[styles.header, { borderBottomColor: colors.border }]}>
           <ThemedText type="title" style={styles.headerTitle}>
             Contacts
           </ThemedText>
@@ -131,7 +131,9 @@ export function ContactsScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.searchContainer}>
+        <View
+          style={[styles.searchContainer, { borderBottomColor: colors.border }]}
+        >
           <View
             style={[
               styles.searchInputContainer,
@@ -147,9 +149,7 @@ export function ContactsScreen() {
               name="search"
               size={24}
               color={
-                colorScheme === "dark"
-                  ? colors.tabIconDefault
-                  : colors.tabIconDefault
+                colorScheme === "dark" ? colors.icon : colors.tabIconDefault
               }
               style={styles.searchIcon}
             />
@@ -193,9 +193,7 @@ export function ContactsScreen() {
             <ContactRow user={item} onPress={handleContactPress} />
           )}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.listContent}
         />
-        {/* Add Contact Modal */}
         <Modal
           animationType="slide"
           transparent={true}
@@ -385,9 +383,6 @@ const styles = StyleSheet.create({
     height: 40,
     fontSize: 16,
     paddingVertical: 0,
-  },
-  listContent: {
-    paddingBottom: 20,
   },
   contactRow: {
     flexDirection: "row",
