@@ -2,7 +2,8 @@ import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { Colors } from "@/constants/Colors";
 import { useColorScheme } from "@/hooks/useColorScheme";
-import { Message } from "@/models/mockData";
+import { Message } from "@/types/Message";
+import { getAvatarSource } from "@/utils/imageUtils";
 import { MaterialIcons } from "@expo/vector-icons";
 import { RouteProp, useNavigation, useRoute } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -54,7 +55,7 @@ export function ProfileScreen() {
   const { userName, avatarUrl, phoneNumber, mediaMessages = [] } = route.params;
 
   // Format profile image for the viewer
-  const profileImage = [{ uri: avatarUrl }];
+  const profileImage = [getAvatarSource(avatarUrl)];
 
   // Format media images for the viewer
   const mediaImages = mediaMessages.map((message: Message) => ({
@@ -122,7 +123,7 @@ export function ProfileScreen() {
             activeOpacity={0.9}
           >
             <Image
-              source={{ uri: avatarUrl }}
+              source={getAvatarSource(avatarUrl)}
               style={styles.profileImage}
               contentFit="cover"
             />

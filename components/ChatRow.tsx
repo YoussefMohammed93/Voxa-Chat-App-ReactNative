@@ -1,53 +1,97 @@
 import { Colors } from "@/constants/Colors";
+import { Doc, Id } from "@/convex/_generated/dataModel";
 import { useColorScheme } from "@/hooks/useColorScheme";
-import { ChatUser } from "@/models/mockData";
+import { getAvatarSource } from "@/utils/imageUtils";
 import { Image } from "expo-image";
 import React from "react";
 import { StyleSheet, TouchableOpacity, View } from "react-native";
 import { ThemedText } from "./ThemedText";
 
 interface ChatRowProps {
-  user: ChatUser;
-  onPress: (userId: string) => void;
+  chat: {
+    _id: Id<"chats">;
+    _creationTime: number;
+    participants: Id<"users">[];
+    lastMessageText?: string;
+    lastMessageTime?: number;
+    createdAt: number;
+    otherParticipants: (Doc<"users"> | null)[];
+  };
+  onPress: (chatId: Id<"chats">) => void;
 }
 
-export function ChatRow({ user, onPress }: ChatRowProps) {
+export function ChatRow({ chat, onPress }: ChatRowProps) {
   const colorScheme = useColorScheme() ?? "light";
   const colors = Colors[colorScheme];
+
+  // Get the other participant (assuming 1-on-1 chats for now)
+  const otherUser = chat.otherParticipants[0];
+
+  if (!otherUser) {
+    return null;
+  }
+
+  // Format the last message time
+  const formatTime = (timestamp?: number) => {
+    if (!timestamp) return "";
+
+    const date = new Date(timestamp);
+    const now = new Date();
+
+    // If today, show time
+    if (date.toDateString() === now.toDateString()) {
+      return date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+
+    // If this week, show day name
+    const daysDiff = Math.floor(
+      (now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24)
+    );
+    if (daysDiff < 7) {
+      return date.toLocaleDateString([], { weekday: "short" });
+    }
+
+    // Otherwise show date
+    return date.toLocaleDateString([], { month: "short", day: "numeric" });
+  };
 
   return (
     <TouchableOpacity
       style={[styles.container, { borderBottomColor: colors.border }]}
-      onPress={() => onPress(user.id)}
+      onPress={() => onPress(chat._id)}
       activeOpacity={0.7}
     >
       <View style={styles.avatarContainer}>
         <Image
-          source={{ uri: user.avatarUrl }}
+          source={getAvatarSource(otherUser.profileImageUrl)}
           style={styles.avatar}
           contentFit="cover"
         />
-        {user.isOnline && (
+        {/* We don't have online status yet, so hiding this for now */}
+        {/* {isOnline && (
           <View
             style={[
               styles.onlineIndicator,
               { backgroundColor: colors.success },
             ]}
           />
-        )}
+        )} */}
       </View>
 
       <View style={styles.contentContainer}>
         <View style={styles.topRow}>
           <ThemedText style={styles.name}>
-            {user.firstName} {user.lastName}
+            {otherUser.firstName} {otherUser.lastName}
           </ThemedText>
           <ThemedText
             style={styles.lastSeen}
             lightColor={Colors.light.tabIconDefault}
             darkColor={Colors.dark.tabIconDefault}
           >
-            {user.lastSeen}
+            {formatTime(chat.lastMessageTime)}
           </ThemedText>
         </View>
         <ThemedText
@@ -56,7 +100,7 @@ export function ChatRow({ user, onPress }: ChatRowProps) {
           darkColor={Colors.dark.tabIconDefault}
           numberOfLines={1}
         >
-          {user.lastMessage}
+          {chat.lastMessageText || "No messages yet"}
         </ThemedText>
       </View>
     </TouchableOpacity>

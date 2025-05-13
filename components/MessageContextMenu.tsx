@@ -201,6 +201,14 @@ export function MessageContextMenu({
     // Close menu first
     onClose();
 
+    // Don't allow certain actions on deleted messages
+    if (
+      message.isDeleted &&
+      ["reply", "copy", "forward", "delete"].includes(action)
+    ) {
+      return; // Silently ignore these actions on deleted messages
+    }
+
     // Slight delay to allow animation to complete (WhatsApp-like behavior)
     setTimeout(() => {
       switch (action) {
@@ -245,19 +253,34 @@ export function MessageContextMenu({
 
     // Create a placeholder that matches the message's appearance
     const isTextMessage = message.type === "text";
-    const backgroundColor = isOutgoing
-      ? colorScheme === "dark"
-        ? colors.primary // Use theme primary color
-        : colors.primary
-      : colorScheme === "dark"
-        ? "rgba(255, 255, 255, 0.1)"
-        : "#FFFFFF";
 
-    const textColor = isOutgoing
-      ? "#FFFFFF"
-      : colorScheme === "dark"
+    // Determine background color based on message state (deleted or normal)
+    const backgroundColor = message.isDeleted
+      ? isOutgoing
+        ? colorScheme === "dark"
+          ? "rgba(0, 92, 175, 0.5)" // Lighter color for deleted outgoing messages
+          : "rgba(0, 92, 175, 0.5)"
+        : colorScheme === "dark"
+          ? "rgba(255,255,255,0.05)" // Lighter color for deleted incoming messages
+          : "rgba(240,240,240,0.7)"
+      : isOutgoing
+        ? colorScheme === "dark"
+          ? colors.primary // Use theme primary color
+          : colors.primary
+        : colorScheme === "dark"
+          ? "rgba(255, 255, 255, 0.1)"
+          : "#FFFFFF";
+
+    // Determine text color
+    const textColor = message.isDeleted
+      ? colorScheme === "dark"
+        ? "#999999"
+        : "#666666"
+      : isOutgoing
         ? "#FFFFFF"
-        : "#000000";
+        : colorScheme === "dark"
+          ? "#FFFFFF"
+          : "#000000";
 
     return (
       <Animated.View
@@ -278,7 +301,23 @@ export function MessageContextMenu({
           },
         ]}
       >
-        {isTextMessage ? (
+        {message.isDeleted ? (
+          // Render deleted message placeholder
+          <View>
+            <ThemedText
+              style={{
+                fontSize: 16,
+                color: textColor,
+                marginBottom: 14,
+                fontStyle: "italic",
+                opacity: 0.7,
+              }}
+            >
+              This message was deleted
+            </ThemedText>
+          </View>
+        ) : isTextMessage ? (
+          // Render normal text message
           <View>
             <ThemedText
               style={{ fontSize: 16, color: textColor, marginBottom: 14 }}
@@ -287,6 +326,7 @@ export function MessageContextMenu({
             </ThemedText>
           </View>
         ) : (
+          // Render image message
           <View
             style={{
               width: "100%",
@@ -329,7 +369,7 @@ export function MessageContextMenu({
           >
             {message.timestamp}
           </ThemedText>
-          {isOutgoing && (
+          {isOutgoing && !message.isDeleted && (
             <MaterialIcons
               name={message.status === "read" ? "done-all" : "done"}
               size={14}
@@ -383,7 +423,26 @@ export function MessageContextMenu({
             ]}
           >
             {/* Different menu options based on message type */}
-            {message.type === "image" ? (
+            {message.isDeleted ? (
+              // Deleted message menu options (limited)
+              <>
+                {/* Info option (only for outgoing messages) */}
+                {isOutgoing && (
+                  <TouchableOpacity
+                    style={[styles.menuItem, styles.lastMenuItem]}
+                    onPress={() => handleMenuItemPress("info")}
+                  >
+                    <MaterialIcons
+                      name="info-outline"
+                      size={22}
+                      color={colors.text}
+                      style={styles.menuIcon}
+                    />
+                    <ThemedText style={styles.menuText}>Info</ThemedText>
+                  </TouchableOpacity>
+                )}
+              </>
+            ) : message.type === "image" ? (
               // Image message menu options
               <>
                 {/* View option (for image messages) */}

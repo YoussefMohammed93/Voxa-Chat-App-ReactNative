@@ -1,13 +1,20 @@
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { Colors } from "@/constants/Colors";
+import { useUser } from "@/contexts/UserContext";
+import { api } from "@/convex/_generated/api";
+import { Doc, Id } from "@/convex/_generated/dataModel";
 import { useColorScheme } from "@/hooks/useColorScheme";
-import { User, mockAllUsers } from "@/models/mockData";
+import { useCreateChat } from "@/hooks/useCreateChat";
+import { getAvatarSource } from "@/utils/imageUtils";
 import { MaterialIcons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
+import { useMutation, useQuery } from "convex/react";
+import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   KeyboardAvoidingView,
@@ -21,8 +28,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 interface ContactRowProps {
-  user: User;
-  onPress: (userId: string) => void;
+  user: Doc<"users">;
+  onPress: (userId: Id<"users">) => void;
 }
 
 function ContactRow({ user, onPress }: ContactRowProps) {
@@ -38,11 +45,11 @@ function ContactRow({ user, onPress }: ContactRowProps) {
             colorScheme === "dark" ? colors.border : colors.border,
         },
       ]}
-      onPress={() => onPress(user.id)}
+      onPress={() => onPress(user._id)}
       activeOpacity={0.7}
     >
       <Image
-        source={{ uri: user.avatarUrl }}
+        source={getAvatarSource(user.profileImageUrl)}
         style={styles.avatar}
         contentFit="cover"
       />
@@ -55,7 +62,7 @@ function ContactRow({ user, onPress }: ContactRowProps) {
           lightColor={Colors.light.tabIconDefault}
           darkColor={Colors.dark.tabIconDefault}
         >
-          {user.phoneNumber}
+          {user.phoneNumber || "No phone number"}
         </ThemedText>
       </View>
     </TouchableOpacity>
@@ -66,45 +73,122 @@ export function ContactsScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const colors = Colors[colorScheme];
   const navigation = useNavigation();
+  const { userId, userDetails } = useUser();
+
+  // Debug log for authentication state
+  console.log("ContactsScreen - Auth state:", {
+    userId,
+    hasUserDetails: !!userDetails,
+  });
 
   const [searchText, setSearchText] = useState("");
-  const [filteredContacts, setFilteredContacts] = useState(mockAllUsers);
+  const [filteredContacts, setFilteredContacts] = useState<Doc<"users">[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   const [modalVisible, setModalVisible] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [newContactName, setNewContactName] = useState("");
+  const [addingContact, setAddingContact] = useState(false);
 
-  // Filter contacts based on search text with debounce
+  // Get contacts from Convex
+  const contacts = useQuery(
+    api.contacts.getByUserId,
+    userId ? { userId } : "skip"
+  );
+
+  // Add contact mutation
+  const addContact = useMutation(api.contacts.addByPhoneNumber);
+
+  // Add a timeout to ensure loading state doesn't continue indefinitely
   useEffect(() => {
-    const timeout = setTimeout(() => {
+    // Set a timeout to ensure we don't show loading state forever
+    const timeoutId = setTimeout(() => {
+      if (isLoading) {
+        console.log("Loading timeout reached, showing empty state");
+        setIsLoading(false);
+      }
+    }, 5000); // 5 seconds timeout
+
+    return () => clearTimeout(timeoutId);
+  }, [isLoading]);
+
+  // Update filtered contacts when contacts change or search text changes
+  useEffect(() => {
+    // If userId is not available, we can't load contacts
+    if (!userId) {
+      console.log("No userId available, showing empty state");
+      setIsLoading(false);
+      setFilteredContacts([]);
+      return;
+    }
+
+    // If contacts is undefined, it means the query is still loading
+    if (contacts === undefined) {
+      console.log("Contacts query is loading");
+      setIsLoading(true);
+      return;
+    }
+
+    // Set loading to false once we have a definitive result (even if it's an empty array)
+    console.log(
+      "Contacts query completed, found:",
+      contacts ? contacts.length : 0,
+      "contacts"
+    );
+    setIsLoading(false);
+
+    // If we have contacts, filter them based on search text
+    if (contacts && contacts.length > 0) {
       if (searchText) {
-        const filtered = mockAllUsers.filter(
-          (contact) =>
+        const filtered = contacts.filter((contact) => {
+          if (!contact) return false;
+          return (
             contact.firstName
               .toLowerCase()
               .includes(searchText.toLowerCase()) ||
             contact.lastName.toLowerCase().includes(searchText.toLowerCase()) ||
-            contact.phoneNumber.includes(searchText)
+            (contact.phoneNumber && contact.phoneNumber.includes(searchText))
+          );
+        });
+        setFilteredContacts(
+          filtered.filter((c): c is Doc<"users"> => c !== null)
         );
-        setFilteredContacts(filtered);
       } else {
-        setFilteredContacts(mockAllUsers);
+        setFilteredContacts(
+          contacts.filter((c): c is Doc<"users"> => c !== null)
+        );
       }
-    }, 300); // 300ms debounce
+    } else {
+      // If there are no contacts, set filtered contacts to an empty array
+      setFilteredContacts([]);
+    }
+  }, [contacts, searchText, userId]);
 
-    return () => {
-      clearTimeout(timeout);
-    };
-  }, [searchText]);
+  // Import the useCreateChat hook
+  const { createChatWithUser } = useCreateChat();
 
-  const handleContactPress = (userId: string) => {
-    const user = mockAllUsers.find((user) => user.id === userId);
-    if (user) {
-      // @ts-ignore - Navigation typing issue
-      navigation.navigate("ChatScreen", {
-        userId,
-        userName: `${user.firstName} ${user.lastName}`,
-      });
+  const handleContactPress = async (contactId: Id<"users">) => {
+    if (!contacts) return;
+
+    const contact = contacts.find((c) => c && c._id === contactId);
+    if (!contact) return;
+
+    try {
+      // Create or get existing chat with this contact
+      const chatId = await createChatWithUser(contactId);
+
+      if (chatId) {
+        // Navigate to the chat screen
+        // @ts-ignore - Navigation typing issue
+        navigation.navigate("ChatScreen", {
+          chatId,
+          userId: contactId,
+          userName: `${contact.firstName} ${contact.lastName}`,
+        });
+      }
+    } catch (error) {
+      console.error("Error navigating to chat:", error);
+      Alert.alert("Error", "Failed to open chat. Please try again.");
     }
   };
 
@@ -186,14 +270,39 @@ export function ContactsScreen() {
           </View>
         </View>
 
-        <FlatList
-          data={filteredContacts}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <ContactRow user={item} onPress={handleContactPress} />
-          )}
-          showsVerticalScrollIndicator={false}
-        />
+        {isLoading && !filteredContacts.length ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <ThemedText style={styles.loadingText}>
+              Loading contacts...
+            </ThemedText>
+          </View>
+        ) : filteredContacts.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <MaterialIcons
+              name="people-outline"
+              size={80}
+              color={colors.tabIconDefault}
+            />
+            <ThemedText style={styles.emptyTitle}>
+              {searchText ? "No contacts found" : "No contacts yet"}
+            </ThemedText>
+            <ThemedText style={styles.emptySubtitle}>
+              {searchText
+                ? "Try a different search term"
+                : "Add contacts to start messaging"}
+            </ThemedText>
+          </View>
+        ) : (
+          <FlatList
+            data={filteredContacts}
+            keyExtractor={(item) => item._id}
+            renderItem={({ item }) => (
+              <ContactRow user={item} onPress={handleContactPress} />
+            )}
+            showsVerticalScrollIndicator={false}
+          />
+        )}
         <Modal
           animationType="slide"
           transparent={true}
@@ -279,16 +388,22 @@ export function ContactsScreen() {
                 style={[
                   styles.addContactButton,
                   { backgroundColor: colors.primary },
+                  addingContact && { opacity: 0.7 },
                 ]}
                 onPress={handleAddContact}
+                disabled={addingContact}
               >
-                <ThemedText
-                  style={styles.addContactButtonText}
-                  darkColor="#FFFFFF"
-                  lightColor="#FFFFFF"
-                >
-                  Add Contact
-                </ThemedText>
+                {addingContact ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <ThemedText
+                    style={styles.addContactButtonText}
+                    darkColor="#FFFFFF"
+                    lightColor="#FFFFFF"
+                  >
+                    Add Contact
+                  </ThemedText>
+                )}
               </TouchableOpacity>
             </View>
           </KeyboardAvoidingView>
@@ -297,38 +412,63 @@ export function ContactsScreen() {
     </ThemedView>
   );
 
-  function handleAddContact() {
-    if (!phoneNumber.trim() || !newContactName.trim()) {
-      Alert.alert("Error", "Please enter both phone number and name");
+  async function handleAddContact() {
+    if (!userId) {
+      console.error(
+        "No user ID found in UserContext when trying to add contact"
+      );
+      Alert.alert(
+        "Authentication Error",
+        "You must be logged in to add contacts. Please restart the app or log out and log in again if this issue persists."
+      );
       return;
     }
 
-    // Split the name into first and last name
-    const nameParts = newContactName.trim().split(" ");
-    const firstName = nameParts[0];
-    const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "";
+    if (!phoneNumber.trim()) {
+      Alert.alert("Error", "Please enter a phone number");
+      return;
+    }
 
-    // Create a new contact
-    const newContact: User = {
-      id: `user-${Date.now()}`,
-      firstName,
-      lastName,
-      phoneNumber: phoneNumber.trim(),
-      avatarUrl: `https://randomuser.me/api/portraits/${Math.random() > 0.5 ? "men" : "women"}/${Math.floor(Math.random() * 100)}.jpg`,
-    };
+    try {
+      setAddingContact(true);
 
-    // Add to the mockAllUsers array (in a real app, this would be a server call)
-    mockAllUsers.push(newContact);
+      // Format the phone number if needed
+      let formattedPhoneNumber = phoneNumber.trim();
+      if (!formattedPhoneNumber.startsWith("+")) {
+        formattedPhoneNumber = `+${formattedPhoneNumber}`;
+      }
 
-    // Reset the form and close the modal
-    setPhoneNumber("");
-    setNewContactName("");
-    setModalVisible(false);
+      // Call the Convex mutation to add the contact
+      await addContact({
+        userId,
+        phoneNumber: formattedPhoneNumber,
+      });
 
-    // Refresh the contacts list
-    setFilteredContacts([...mockAllUsers]);
+      // Provide haptic feedback on success
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-    Alert.alert("Success", "Contact added successfully");
+      // Reset the form and close the modal
+      setPhoneNumber("");
+      setNewContactName("");
+      setModalVisible(false);
+
+      Alert.alert("Success", "Contact added successfully");
+    } catch (error) {
+      console.error("Error adding contact:", error);
+
+      // Provide haptic feedback on error
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+
+      // Show error message
+      Alert.alert(
+        "Error",
+        error instanceof Error
+          ? error.message
+          : "Failed to add contact. Please try again."
+      );
+    } finally {
+      setAddingContact(false);
+    }
   }
 }
 
@@ -407,6 +547,35 @@ const styles = StyleSheet.create({
   phoneNumber: {
     fontSize: 14,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  emptyTitle: {
+    fontSize: 22,
+    fontWeight: "600",
+    marginTop: 16,
+    textAlign: "center",
+  },
+  emptySubtitle: {
+    fontSize: 16,
+    textAlign: "center",
+    marginTop: 8,
+    opacity: 0.7,
+    paddingHorizontal: 20,
+  },
   modalContainer: {
     flex: 1,
     justifyContent: "center",
@@ -451,6 +620,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginTop: 10,
+    minHeight: 48,
   },
   addContactButtonText: {
     fontWeight: "600",

@@ -12,14 +12,18 @@ interface SettingsItemProps {
   icon: string;
   title: string;
   onPress: () => void;
+  style?: any;
 }
 
-function SettingsItem({ icon, title, onPress }: SettingsItemProps) {
+function SettingsItem({ icon, title, onPress, style }: SettingsItemProps) {
   const colorScheme = useColorScheme() ?? "light";
   const colors = Colors[colorScheme];
 
   return (
-    <TouchableOpacity style={styles.settingsItem} onPress={onPress}>
+    <TouchableOpacity
+      style={[styles.settingsItem, { borderBottomColor: colors.border }, style]}
+      onPress={onPress}
+    >
       <MaterialIcons
         name={icon as any}
         size={24}
@@ -72,12 +76,7 @@ export function SettingsScreen() {
           </ThemedText>
         </View>
 
-        <View
-          style={[
-            styles.settingsSection,
-            { borderBottomColor: colors.border, borderBottomWidth: 1 },
-          ]}
-        >
+        <View style={styles.settingsSection}>
           <ThemedText
             style={styles.sectionTitle}
             lightColor={Colors.light.tabIconDefault}
@@ -97,13 +96,7 @@ export function SettingsScreen() {
           />
         </View>
 
-        <View
-          style={[
-            styles.settingsSection,
-            { borderBottomColor: colors.border },
-            { borderBottomWidth: 1 },
-          ]}
-        >
+        <View style={styles.settingsSection}>
           <ThemedText
             style={styles.sectionTitle}
             lightColor={Colors.light.tabIconDefault}
@@ -130,6 +123,7 @@ export function SettingsScreen() {
             icon="info"
             title="About"
             onPress={() => handleSettingsPress("About")}
+            style={{ borderBottomWidth: 0 }}
           />
         </View>
       </SafeAreaView>
@@ -171,10 +165,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(0, 0, 0, 0.05)",
   },
   itemIcon: {
-    marginRight: 16,
+    marginRight: 10,
   },
   itemTitle: {
     flex: 1,

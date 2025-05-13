@@ -1,13 +1,17 @@
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { Colors } from "@/constants/Colors";
+import { useUser } from "@/contexts/UserContext";
+import { api } from "@/convex/_generated/api";
 import { useColorScheme } from "@/hooks/useColorScheme";
 import { MaterialIcons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
+import { useMutation } from "convex/react";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   StyleSheet,
   TextInput,
@@ -20,14 +24,32 @@ export function ProfileSettingsScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const colors = Colors[colorScheme];
   const navigation = useNavigation();
+  const { userId, userDetails, isLoading: isUserLoading } = useUser();
 
-  // Mock user data - in a real app, this would come from a user context or API
-  const [firstName, setFirstName] = useState("John");
-  const [lastName, setLastName] = useState("Doe");
-  const [phoneNumber, setPhoneNumber] = useState("+201234567890");
-  const [profileImage, setProfileImage] = useState<string | null>(
-    "https://randomuser.me/api/portraits/men/32.jpg"
-  );
+  // State for form fields
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [profileImage, setProfileImage] = useState<string | null>(null);
+
+  // State for loading indicators
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+
+  // Convex mutations
+  const updateUser = useMutation(api.users.update);
+  const generateUploadUrl = useMutation(api.storage.generateUploadUrl);
+  const saveProfileImage = useMutation(api.storage.saveProfileImage);
+
+  // Load user data when available
+  useEffect(() => {
+    if (userDetails) {
+      setFirstName(userDetails.firstName || "");
+      setLastName(userDetails.lastName || "");
+      setPhoneNumber(userDetails.phoneNumber || "");
+      setProfileImage(userDetails.profileImageUrl || null);
+    }
+  }, [userDetails]);
 
   const handlePickImage = async () => {
     const permissionResult =
@@ -48,17 +70,97 @@ export function ProfileSettingsScreen() {
       quality: 0.8,
     });
 
-    if (!result.canceled) {
-      setProfileImage(result.assets[0].uri);
-      // In a real app, you would upload this to your server or cloud storage
+    if (!result.canceled && userId) {
+      try {
+        setIsUploading(true);
+        const imageUri = result.assets[0].uri;
+
+        // 1. Get an upload URL from Convex
+        const uploadUrl = await generateUploadUrl();
+
+        // 2. Upload the image file to the URL
+        // Convert the local URI to a blob
+        const response = await fetch(imageUri);
+        const blob = await response.blob();
+
+        // Upload the blob to the Convex URL
+        const uploadResponse = await fetch(uploadUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": blob.type,
+          },
+          body: blob,
+        });
+
+        if (!uploadResponse.ok) {
+          throw new Error(
+            `Upload failed with status: ${uploadResponse.status}`
+          );
+        }
+
+        // Get the storageId from the response
+        const { storageId } = await uploadResponse.json();
+
+        if (!storageId) {
+          throw new Error("No storageId returned from upload");
+        }
+
+        // 3. Save the storage ID to the user's profile
+        const imageUrl = await saveProfileImage({
+          storageId,
+          userId,
+        });
+
+        // Update local state with the new image URL
+        setProfileImage(imageUrl);
+      } catch (error) {
+        console.error("Error uploading image:", error);
+        Alert.alert("Error", "Failed to upload image. Please try again.");
+      } finally {
+        setIsUploading(false);
+      }
     }
   };
 
-  const handleSaveChanges = () => {
-    // In a real app, you would save changes to the server
-    Alert.alert("Success", "Profile updated successfully");
-    navigation.goBack();
+  const handleSaveChanges = async () => {
+    if (!userId) {
+      Alert.alert("Error", "User not found. Please log in again.");
+      return;
+    }
+
+    try {
+      setIsUpdating(true);
+
+      // Update user profile in Convex
+      await updateUser({
+        id: userId,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+      });
+
+      Alert.alert("Success", "Profile updated successfully");
+      navigation.goBack();
+    } catch (error) {
+      console.error("Error updating profile:", error);
+      Alert.alert("Error", "Failed to update profile. Please try again.");
+    } finally {
+      setIsUpdating(false);
+    }
   };
+
+  // Show loading indicator while fetching user data
+  if (isUserLoading) {
+    return (
+      <ThemedView
+        style={[styles.container, styles.loadingContainer]}
+        lightColor={Colors.light.surface}
+        darkColor={Colors.dark.background}
+      >
+        <ActivityIndicator size="large" color={Colors.light.primary} />
+        <ThemedText style={{ marginTop: 16 }}>Loading profile...</ThemedText>
+      </ThemedView>
+    );
+  }
 
   return (
     <ThemedView
@@ -81,14 +183,19 @@ export function ProfileSettingsScreen() {
           <TouchableOpacity
             style={styles.saveButton}
             onPress={handleSaveChanges}
+            disabled={isUpdating}
           >
-            <ThemedText
-              style={styles.saveButtonText}
-              lightColor={Colors.light.primary}
-              darkColor={Colors.dark.primary}
-            >
-              Save
-            </ThemedText>
+            {isUpdating ? (
+              <ActivityIndicator size="small" color={Colors.light.primary} />
+            ) : (
+              <ThemedText
+                style={styles.saveButtonText}
+                lightColor={Colors.light.primary}
+                darkColor={Colors.dark.primary}
+              >
+                Save
+              </ThemedText>
+            )}
           </TouchableOpacity>
         </View>
 
@@ -97,8 +204,13 @@ export function ProfileSettingsScreen() {
           <TouchableOpacity
             style={styles.profileImageContainer}
             onPress={handlePickImage}
+            disabled={isUploading}
           >
-            {profileImage ? (
+            {isUploading ? (
+              <View style={[styles.profileImage, styles.uploadingContainer]}>
+                <ActivityIndicator size="large" color="#FFFFFF" />
+              </View>
+            ) : profileImage ? (
               <Image
                 source={{ uri: profileImage }}
                 style={styles.profileImage}
@@ -218,6 +330,10 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
   },
+  loadingContainer: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -234,6 +350,8 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     padding: 8,
+    minWidth: 50,
+    alignItems: "center",
   },
   saveButtonText: {
     fontSize: 16,
@@ -253,6 +371,11 @@ const styles = StyleSheet.create({
     width: 100,
     height: 100,
     borderRadius: 50,
+  },
+  uploadingContainer: {
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
   },
   profileImagePlaceholder: {
     width: 100,

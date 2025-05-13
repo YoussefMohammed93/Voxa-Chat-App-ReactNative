@@ -1,11 +1,16 @@
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { Colors } from "@/constants/Colors";
+import { useUser } from "@/contexts/UserContext";
+import { api } from "@/convex/_generated/api";
+import { Id } from "@/convex/_generated/dataModel";
 import { useColorScheme } from "@/hooks/useColorScheme";
-import { Message, mockChats, mockMessages } from "@/models/mockData";
+import { useNotification } from "@/src/contexts/NotificationContext";
+import { ConvexMessage, Message, convertConvexMessage } from "@/types/Message";
 import { formatMessageDate, isSameDay } from "@/utils/dateUtils";
 import { MaterialIcons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
+import { useMutation, useQuery } from "convex/react";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
@@ -26,6 +31,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { getAvatarSource } from "../../utils/imageUtils";
 import { DateSeparator } from "../DateSeparator";
 import { MessageContextMenu } from "../MessageContextMenu";
 import { MessageInfoModal } from "../MessageInfoModal";
@@ -46,6 +52,7 @@ interface MessageBubbleProps {
   onDeleteMessage?: (message: Message) => void;
   selectedMessageId?: string; // ID of the selected message for highlighting
   isContextMenuVisible?: boolean; // Whether the context menu is visible
+  currentUserId?: Id<"users"> | null; // Current user ID for determining if a message is outgoing
 }
 
 function MessageBubble({
@@ -54,12 +61,13 @@ function MessageBubble({
   replyToMessage,
   userName = "User",
   onImagePress,
-  onReply,
+  onReply: _onReply,
   onShowContextMenu,
-  onMessageInfo,
-  onDeleteMessage,
+  onMessageInfo: _onMessageInfo,
+  onDeleteMessage: _onDeleteMessage,
   selectedMessageId,
   isContextMenuVisible,
+  currentUserId,
 }: MessageBubbleProps) {
   const colorScheme = useColorScheme() ?? "light";
   const colors = Colors[colorScheme];
@@ -85,22 +93,78 @@ function MessageBubble({
 
   // Determine message width based on content length
   const getMessageWidth = () => {
+    // Get the content to measure (either the message content or reply content)
+    const contentToMeasure = message.content;
+    const contentLength = contentToMeasure.length;
+    const lineBreaks = (contentToMeasure.match(/\n/g) || []).length;
+
+    // For non-text messages, use a fixed width
     if (message.type !== "text") {
-      // For non-text messages, use default width
-      return { maxWidth: "80%" as const };
+      return {
+        maxWidth: "80%" as const,
+        minWidth: 200, // Ensure images have a reasonable minimum width
+      };
     }
 
-    const contentLength = message.content.length;
-    const lineBreaks = (message.content.match(/\n/g) || []).length;
+    // For messages with replies, we need to be more careful with sizing
+    if (replyToMessage) {
+      // Very short messages with replies (like "OK", "Yes", etc.)
+      if (contentLength <= 5 && lineBreaks === 0) {
+        return {
+          maxWidth: "auto" as const,
+          minWidth: Math.min(150, windowWidth * 0.3), // Narrow but not too narrow
+        };
+      }
 
-    // Short messages: fit content naturally (minimum width)
+      // Short messages with replies
+      if (contentLength < 20 && lineBreaks === 0) {
+        return {
+          maxWidth: "auto" as const,
+          minWidth: Math.min(200, windowWidth * 0.4), // Wider than very short messages
+        };
+      }
+
+      // Medium messages with replies
+      if (contentLength < 50) {
+        return {
+          maxWidth: "60%" as const, // Slightly narrower than standard
+          minWidth: Math.min(250, windowWidth * 0.5),
+        };
+      }
+
+      // Longer messages with replies
+      return {
+        maxWidth: "80%" as const,
+        minWidth: Math.min(300, windowWidth * 0.6),
+      };
+    }
+
+    // For messages without replies, use a more natural sizing approach
+
+    // Very short messages (like "OK", "Yes", etc.)
+    if (contentLength <= 5 && lineBreaks === 0) {
+      return {
+        maxWidth: "auto" as const,
+        minWidth: 60, // Just enough for very short text
+      };
+    }
+
+    // Short messages
     if (contentLength < 20 && lineBreaks === 0) {
       return {
         maxWidth: "auto" as const,
-      }; // Use natural width with minWidth from styles
+        minWidth: 80, // Ensure a minimum width for short messages
+      };
     }
 
-    // Medium to long messages: max out at 80% of screen width
+    // Medium-length messages
+    if (contentLength < 50) {
+      return {
+        maxWidth: "60%" as const, // Narrower than long messages
+      };
+    }
+
+    // Long messages
     if (contentLength < 100) {
       return {
         maxWidth: "80%" as const,
@@ -117,39 +181,104 @@ function MessageBubble({
   // Check if this message is the selected one for the context menu
   const isSelected = selectedMessageId === message.id && isContextMenuVisible;
 
-  const bubbleStyle = isOutgoing
-    ? [
-        styles.messageBubble,
-        styles.outgoingBubble,
-        {
-          backgroundColor: isSelected
-            ? colorScheme === "dark"
-              ? "rgba(0, 92, 175, 0.9)" // Darker highlight for dark mode (WhatsApp style)
-              : "rgba(0, 92, 175, 0.9)" // WhatsApp green highlight for light mode
-            : colors.primary,
-        },
-        getMessageWidth(),
-      ]
-    : [
-        styles.messageBubble,
-        styles.incomingBubble,
-        {
-          backgroundColor: isSelected
-            ? colorScheme === "dark"
-              ? "rgba(70, 70, 70, 0.9)" // Darker highlight for dark mode (WhatsApp style)
-              : "rgba(180, 180, 180, 0.9)" // WhatsApp gray highlight for light mode
-            : colorScheme === "dark"
-              ? "rgba(255,255,255,0.1)"
-              : "#F0F0F0",
-        },
-        getMessageWidth(),
-      ];
+  // Determine bubble style based on message state (deleted or normal)
+  const bubbleStyle = (() => {
+    // For deleted messages, use a lighter background color
+    if (message.isDeleted) {
+      return isOutgoing
+        ? [
+            styles.messageBubble,
+            styles.outgoingBubble,
+            {
+              backgroundColor: isSelected
+                ? colorScheme === "dark"
+                  ? "rgba(0, 92, 175, 0.9)" // Highlight color for selected
+                  : "rgba(0, 92, 175, 0.9)"
+                : colorScheme === "dark"
+                  ? "rgba(0, 92, 175, 0.5)" // Lighter color for deleted outgoing messages
+                  : "rgba(0, 92, 175, 0.5)",
+            },
+            getMessageWidth(),
+          ]
+        : [
+            styles.messageBubble,
+            styles.incomingBubble,
+            {
+              backgroundColor: isSelected
+                ? colorScheme === "dark"
+                  ? "rgba(70, 70, 70, 0.9)"
+                  : "rgba(180, 180, 180, 0.9)"
+                : colorScheme === "dark"
+                  ? "rgba(255,255,255,0.05)" // Lighter color for deleted incoming messages
+                  : "rgba(240,240,240,0.7)",
+            },
+            getMessageWidth(),
+          ];
+    }
+
+    // Normal message styling
+    return isOutgoing
+      ? [
+          styles.messageBubble,
+          styles.outgoingBubble,
+          {
+            backgroundColor: isSelected
+              ? colorScheme === "dark"
+                ? "rgba(0, 92, 175, 0.9)" // Darker highlight for dark mode (WhatsApp style)
+                : "rgba(0, 92, 175, 0.9)" // WhatsApp green highlight for light mode
+              : colors.primary,
+          },
+          getMessageWidth(),
+        ]
+      : [
+          styles.messageBubble,
+          styles.incomingBubble,
+          {
+            backgroundColor: isSelected
+              ? colorScheme === "dark"
+                ? "rgba(70, 70, 70, 0.9)" // Darker highlight for dark mode (WhatsApp style)
+                : "rgba(180, 180, 180, 0.9)" // WhatsApp gray highlight for light mode
+              : colorScheme === "dark"
+                ? "rgba(255,255,255,0.1)"
+                : "#F0F0F0",
+          },
+          getMessageWidth(),
+        ];
+  })();
 
   const textColor = isOutgoing
     ? { color: "#FFFFFF" }
     : { color: colorScheme === "dark" ? "#FFFFFF" : "#000000" };
 
   const renderContent = () => {
+    // Special handling for deleted messages
+    if (message.isDeleted) {
+      // Use italicized gray text for deleted messages
+      return (
+        <TouchableOpacity
+          activeOpacity={1}
+          onLongPress={handleLongPress}
+          delayLongPress={150}
+        >
+          <View>
+            <ThemedText
+              style={[
+                styles.messageText,
+                styles.deletedMessageText,
+                {
+                  color: colorScheme === "dark" ? "#999999" : "#666666",
+                  fontStyle: "italic",
+                },
+              ]}
+            >
+              This message was deleted
+            </ThemedText>
+          </View>
+        </TouchableOpacity>
+      );
+    }
+
+    // Normal message rendering
     const content = (() => {
       switch (message.type) {
         case "text":
@@ -218,44 +347,83 @@ function MessageBubble({
   const renderReplyPreview = () => {
     if (!replyToMessage) return null;
 
-    const isReplyOutgoing = replyToMessage.senderId === "me";
-    const replyPreviewStyle = isOutgoing
-      ? [
-          styles.replyPreviewBubble,
-          { backgroundColor: "rgba(255, 255, 255, 0.2)" },
-        ]
-      : [styles.replyPreviewBubble, { backgroundColor: "rgba(0, 0, 0, 0.1)" }];
+    // Check if the reply is from the current user
+    const isReplyOutgoing = currentUserId
+      ? replyToMessage.senderId === currentUserId
+      : false;
 
+    // Determine the appropriate background color based on message type and theme
+    const replyBgColor = isOutgoing
+      ? "rgba(255, 255, 255, 0.2)" // Lighter background for outgoing messages
+      : colorScheme === "dark"
+        ? "rgba(50, 50, 50, 0.5)" // Darker background for dark mode
+        : "rgba(0, 0, 0, 0.08)"; // Light gray for light mode
+
+    const replyPreviewStyle = [
+      styles.replyPreviewBubble,
+      { backgroundColor: replyBgColor },
+    ];
+
+    // Determine text color based on message type and theme
     const replyTextColor = isOutgoing
-      ? { color: "rgba(255, 255, 255, 0.9)" }
+      ? { color: "rgba(255, 255, 255, 0.9)" } // White text for outgoing messages
       : {
           color:
             colorScheme === "dark"
-              ? "rgba(255, 255, 255, 0.7)"
-              : "rgba(0, 0, 0, 0.7)",
+              ? "rgba(255, 255, 255, 0.8)" // Brighter text for dark mode
+              : "rgba(0, 0, 0, 0.8)", // Darker text for light mode
         };
 
+    // Determine the color of the vertical bar
     const replyBarColor = isOutgoing
-      ? { backgroundColor: "rgba(255, 255, 255, 0.6)" }
-      : { backgroundColor: colors.primary };
+      ? { backgroundColor: "rgba(255, 255, 255, 0.7)" } // Brighter bar for outgoing
+      : { backgroundColor: colors.primary }; // Primary color for incoming
+
+    // Determine preview text length based on message content length
+    const getPreviewText = () => {
+      if (replyToMessage.type !== "text") return "Photo";
+
+      const content = replyToMessage.content;
+      // For very short content, show it all
+      if (content.length <= 30) return content;
+
+      // For medium content, truncate with ellipsis
+      if (content.length <= 100) return content.substring(0, 30) + "...";
+
+      // For very long content, show beginning and indicate length
+      return content.substring(0, 25) + "...";
+    };
 
     return (
       <View style={replyPreviewStyle}>
+        {/* Vertical indicator bar */}
         <View style={[styles.replyPreviewBar, replyBarColor]} />
+
+        {/* Content container */}
         <View style={styles.replyPreviewContent}>
-          <ThemedText style={[styles.replyPreviewName, replyTextColor]}>
+          {/* Username with appropriate styling */}
+          <ThemedText
+            style={[
+              styles.replyPreviewName,
+              replyTextColor,
+              { fontWeight: "700" }, // Make username more prominent
+            ]}
+            numberOfLines={1}
+          >
             {isReplyOutgoing ? "You" : userName}
           </ThemedText>
 
+          {/* Message content preview */}
           {replyToMessage.type === "text" ? (
-            <ThemedText
-              style={[styles.replyPreviewText, replyTextColor]}
-              numberOfLines={1}
-            >
-              {replyToMessage.content.length > 30
-                ? replyToMessage.content.substring(0, 30) + "..."
-                : replyToMessage.content}
-            </ThemedText>
+            <View style={styles.replyTextContainer}>
+              <ThemedText
+                style={[styles.replyPreviewText, replyTextColor]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {getPreviewText()}
+              </ThemedText>
+            </View>
           ) : (
             <View style={styles.replyPreviewRow}>
               <Image
@@ -263,7 +431,10 @@ function MessageBubble({
                 style={styles.replyPreviewThumbnail}
                 contentFit="cover"
               />
-              <ThemedText style={[styles.replyPreviewText, replyTextColor]}>
+              <ThemedText
+                style={[styles.replyPreviewText, replyTextColor]}
+                numberOfLines={1}
+              >
                 Photo
               </ThemedText>
             </View>
@@ -281,8 +452,13 @@ function MessageBubble({
       ]}
     >
       <View ref={bubbleRef} style={bubbleStyle}>
+        {/* Render reply preview if this message is a reply */}
         {replyToMessage && renderReplyPreview()}
-        {renderContent()}
+
+        {/* Add a small wrapper for the message content with proper spacing */}
+        <View style={replyToMessage ? { marginTop: 2 } : undefined}>
+          {renderContent()}
+        </View>
       </View>
       <View style={styles.messageFooter}>
         <ThemedText
@@ -314,17 +490,32 @@ export function ChatScreen() {
   const flatListRef = useRef<FlatList>(null);
   const screenWidth = Dimensions.get("window").width;
   const screenHeight = Dimensions.get("window").height;
+  const { userId: currentUserId } = useUser();
+  const { setActiveChatId } = useNotification();
 
   // @ts-ignore - Route params typing
-  const { userId, userName } = route.params || {};
+  const { chatId, userId: otherUserId, userName } = route.params || {};
   const [inputText, setInputText] = useState("");
-  const [rawMessages, setRawMessages] = useState<Message[]>(
-    mockMessages[userId] || []
-  );
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Get the other user's details
+  const otherUser = useQuery(
+    api.users.getById,
+    otherUserId ? { id: otherUserId } : "skip"
+  );
+
+  // Get messages for this chat
+  const convexMessages = useQuery(
+    api.chats.getMessages,
+    chatId ? { chatId } : "skip"
+  );
+
+  // Send message mutation
+  const sendMessage = useMutation(api.chats.sendMessage);
 
   // Context menu state
   const [contextMenuVisible, setContextMenuVisible] = useState(false);
@@ -348,38 +539,87 @@ export function ChatScreen() {
     }, 100);
   }, []);
 
-  // Process messages to add date separators and createdAt dates
+  // Add a timeout to ensure loading state doesn't continue indefinitely
   useEffect(() => {
-    // Add createdAt dates to messages if they don't have them
-    const messagesWithDates = rawMessages.map((message, index) => {
-      if (message.createdAt) return message;
-
-      // For mock data, create dates based on index to simulate different days
-      const date = new Date();
-
-      // Distribute messages across different days for demo purposes
-      // First 3 messages: 2 days ago, next 3: yesterday, rest: today
-      if (index < 3) {
-        date.setDate(date.getDate() - 2);
-      } else if (index < 6) {
-        date.setDate(date.getDate() - 1);
+    // Set a timeout to ensure we don't show loading state forever
+    const timeoutId = setTimeout(() => {
+      if (isLoading) {
+        console.log(
+          "Loading timeout reached, showing empty state for messages"
+        );
+        setIsLoading(false);
       }
+    }, 5000); // 5 seconds timeout
 
-      // Set hours based on the timestamp
-      const timeParts = message.timestamp.split(":");
-      if (timeParts.length === 2) {
-        date.setHours(parseInt(timeParts[0], 10));
-        date.setMinutes(parseInt(timeParts[1], 10));
-      }
+    return () => clearTimeout(timeoutId);
+  }, [isLoading]);
 
-      return { ...message, createdAt: date };
-    });
+  // Update active chat ID when entering this screen
+  useEffect(() => {
+    if (chatId) {
+      setActiveChatId(chatId);
+    }
+
+    // Clear active chat ID when leaving the screen
+    return () => {
+      setActiveChatId(null);
+    };
+  }, [chatId, setActiveChatId]);
+
+  // Process messages from Convex to add date separators
+  useEffect(() => {
+    // If chatId is not available, we can't load messages
+    if (!chatId) {
+      console.log("No chatId available, showing empty state for messages");
+      setIsLoading(false);
+      setChatMessages([]);
+      return;
+    }
+
+    if (!currentUserId) {
+      console.log(
+        "No currentUserId available, showing empty state for messages"
+      );
+      setIsLoading(false);
+      setChatMessages([]);
+      return;
+    }
+
+    if (convexMessages === undefined) {
+      // Still loading
+      console.log("Messages query is loading");
+      setIsLoading(true);
+      return;
+    }
+
+    // Set loading to false once we have a definitive result
+    console.log(
+      "Messages query completed, found:",
+      convexMessages ? convexMessages.length : 0,
+      "messages"
+    );
+    setIsLoading(false);
+
+    // If there are no messages, set an empty array
+    if (!convexMessages || convexMessages.length === 0) {
+      setChatMessages([]);
+      return;
+    }
+
+    // Convert Convex messages to UI messages
+    const uiMessages: Message[] = convexMessages.map((message: ConvexMessage) =>
+      convertConvexMessage(message, currentUserId)
+    );
+
+    // Reverse the messages to get chronological order (oldest first)
+    // This is necessary because Convex returns messages in descending order (newest first)
+    const chronologicalMessages = [...uiMessages].reverse();
 
     // Add date separators
     const messagesWithSeparators: Message[] = [];
     let currentDate: Date | null = null;
 
-    messagesWithDates.forEach((message) => {
+    chronologicalMessages.forEach((message) => {
       if (!message.createdAt) return;
 
       // If this is a new date or the first message, add a date separator
@@ -409,30 +649,31 @@ export function ChatScreen() {
     // Scroll to bottom whenever messages change
     // This ensures scrolling works for both sent and received messages
     scrollToBottom(true);
-  }, [rawMessages, scrollToBottom]);
+  }, [convexMessages, currentUserId, chatId, scrollToBottom]);
 
-  const handleSend = () => {
-    if (!inputText.trim()) return;
+  const handleSend = async () => {
+    if (!inputText.trim() || !chatId || !currentUserId) return;
 
-    const now = new Date();
-    const newMessage: Message = {
-      id: `${userId}-${Date.now()}`,
-      senderId: "me",
-      type: "text",
-      content: inputText.trim(),
-      timestamp: now.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-      status: "sent",
-      replyTo: replyingTo ? replyingTo.id : undefined,
-      createdAt: now,
-    };
+    try {
+      // Provide haptic feedback
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-    // Add to raw messages which will trigger the useEffect to process date separators
-    setRawMessages([...rawMessages, newMessage]);
-    setInputText("");
-    setReplyingTo(null);
+      // Send the message to Convex
+      await sendMessage({
+        chatId,
+        senderId: currentUserId,
+        content: inputText.trim(),
+        type: "text",
+        replyToId: replyingTo ? (replyingTo.id as Id<"messages">) : undefined,
+      });
+
+      // Clear the input and reply state
+      setInputText("");
+      setReplyingTo(null);
+    } catch (error) {
+      console.error("Error sending message:", error);
+      Alert.alert("Error", "Failed to send message. Please try again.");
+    }
   };
 
   // Function to pick an image from the gallery
@@ -479,51 +720,33 @@ export function ChatScreen() {
   };
 
   // Function to send an image with optional caption
-  const sendImageWithCaption = (imageUri: string, caption?: string) => {
+  const sendImageWithCaption = async (imageUri: string, caption?: string) => {
+    if (!chatId || !currentUserId) return;
+
     setIsUploading(true);
 
-    // Create a temporary message with isUploading flag
-    const tempId = `temp-${Date.now()}`;
-    const now = new Date();
-    const tempMessage: Message = {
-      id: tempId,
-      senderId: "me",
-      type: "image",
-      content: imageUri,
-      caption: caption, // Add the caption if provided
-      timestamp: now.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-      status: "sent",
-      replyTo: replyingTo ? replyingTo.id : undefined,
-      createdAt: now,
-      isUploading: true, // Mark as uploading
-    };
+    try {
+      // In a real implementation, you would upload the image to storage first
+      // and then use the URL in the message
+      // For now, we'll just send the local URI
 
-    // Add the temporary message to show loading state
-    setRawMessages([...rawMessages, tempMessage]);
+      // Send the message to Convex
+      await sendMessage({
+        chatId,
+        senderId: currentUserId,
+        content: caption ? `${imageUri}|${caption}` : imageUri, // Store caption with image
+        type: "image",
+        replyToId: replyingTo ? (replyingTo.id as Id<"messages">) : undefined,
+      });
 
-    // In a real app, you would upload the image to a server here
-    // For now, we'll simulate a short delay
-    setTimeout(() => {
-      // Replace the temporary message with the final one
-      const finalMessage: Message = {
-        ...tempMessage,
-        id: `${userId}-${Date.now()}`,
-        isUploading: false, // No longer uploading
-      };
-
-      // Update the messages array by replacing the temp message
-      const updatedMessages = rawMessages.map((msg) =>
-        msg.id === tempId ? finalMessage : msg
-      );
-
-      // Add to raw messages which will trigger the useEffect to process date separators
-      setRawMessages(updatedMessages);
+      // Clear the reply state
       setReplyingTo(null);
+    } catch (error) {
+      console.error("Error sending image:", error);
+      Alert.alert("Error", "Failed to send image. Please try again.");
+    } finally {
       setIsUploading(false);
-    }, 2000); // Simulate 2 second upload time
+    }
   };
 
   // Function to handle reply to a message
@@ -581,6 +804,9 @@ export function ChatScreen() {
     setInfoModalVisible(true);
   }, []);
 
+  // Delete message mutation
+  const deleteMessageMutation = useMutation(api.messages.deleteMessage);
+
   // Function to delete a message
   const handleDeleteMessage = useCallback(
     (message: Message) => {
@@ -596,23 +822,46 @@ export function ChatScreen() {
           {
             text: "Delete",
             style: "destructive",
-            onPress: () => {
-              // Remove the message from the list
-              const updatedMessages = rawMessages.filter(
-                (msg) => msg.id !== message.id
-              );
-              setRawMessages(updatedMessages);
+            onPress: async () => {
+              if (!currentUserId) {
+                Alert.alert(
+                  "Error",
+                  "You must be logged in to delete messages."
+                );
+                return;
+              }
 
-              // Provide haptic feedback
-              Haptics.notificationAsync(
-                Haptics.NotificationFeedbackType.Success
-              );
+              try {
+                // Call the Convex mutation to delete the message
+                await deleteMessageMutation({
+                  messageId: message.id as Id<"messages">,
+                  userId: currentUserId,
+                });
+
+                // Provide haptic feedback on success
+                Haptics.notificationAsync(
+                  Haptics.NotificationFeedbackType.Success
+                );
+              } catch (error) {
+                console.error("Error deleting message:", error);
+
+                // Show error message to the user
+                Alert.alert(
+                  "Error",
+                  "Failed to delete message. You can only delete your own messages."
+                );
+
+                // Provide error haptic feedback
+                Haptics.notificationAsync(
+                  Haptics.NotificationFeedbackType.Error
+                );
+              }
             },
           },
         ]
       );
     },
-    [rawMessages]
+    [currentUserId, deleteMessageMutation]
   );
 
   return (
@@ -649,28 +898,26 @@ export function ChatScreen() {
           <TouchableOpacity
             style={styles.headerUserInfo}
             onPress={() => {
-              // Get the current user data
-              const currentUser = mockChats.find((chat) => chat.id === userId);
+              if (!otherUser) return;
+
               // Get all media messages for this chat
-              const mediaMessages =
-                mockMessages[userId]?.filter(
-                  (message) => message.type === "image"
-                ) || [];
+              const mediaMessages = chatMessages.filter(
+                (message) =>
+                  message.type === "image" && !message.isDateSeparator
+              );
 
               // Navigate to profile screen with complete user data
               navigation.navigate("ProfileScreen", {
-                userId,
+                userId: otherUserId,
                 userName,
-                avatarUrl: currentUser?.avatarUrl,
-                phoneNumber: currentUser?.phoneNumber,
+                avatarUrl: otherUser.profileImageUrl,
+                phoneNumber: otherUser.phoneNumber,
                 mediaMessages: mediaMessages,
               });
             }}
           >
             <Image
-              source={{
-                uri: mockChats.find((chat) => chat.id === userId)?.avatarUrl,
-              }}
+              source={getAvatarSource(otherUser?.profileImageUrl)}
               style={styles.headerAvatar}
               contentFit="cover"
             />
@@ -679,9 +926,8 @@ export function ChatScreen() {
                 {userName}
               </ThemedText>
               <ThemedText style={styles.headerSubtitle}>
-                {mockChats.find((chat) => chat.id === userId)?.isOnline
-                  ? "Online"
-                  : mockChats.find((chat) => chat.id === userId)?.lastSeen}
+                {/* We don't have online status yet */}
+                {otherUser ? "Last seen recently" : "Loading..."}
               </ThemedText>
             </View>
           </TouchableOpacity>
@@ -690,22 +936,20 @@ export function ChatScreen() {
             <TouchableOpacity
               style={styles.headerButton}
               onPress={() => {
-                // Get the current user data
-                const currentUser = mockChats.find(
-                  (chat) => chat.id === userId
-                );
+                if (!otherUser) return;
+
                 // Get all media messages for this chat
-                const mediaMessages =
-                  mockMessages[userId]?.filter(
-                    (message) => message.type === "image"
-                  ) || [];
+                const mediaMessages = chatMessages.filter(
+                  (message) =>
+                    message.type === "image" && !message.isDateSeparator
+                );
 
                 // Navigate to profile screen with complete user data
                 navigation.navigate("ProfileScreen", {
-                  userId,
+                  userId: otherUserId,
                   userName,
-                  avatarUrl: currentUser?.avatarUrl,
-                  phoneNumber: currentUser?.phoneNumber,
+                  avatarUrl: otherUser.profileImageUrl,
+                  phoneNumber: otherUser.phoneNumber,
                   mediaMessages: mediaMessages,
                 });
               }}
@@ -720,70 +964,92 @@ export function ChatScreen() {
         </View>
 
         {/* Messages */}
-        <FlatList
-          ref={flatListRef}
-          data={chatMessages}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => {
-            // If this is a date separator, render the DateSeparator component
-            if (item.isDateSeparator) {
-              return <DateSeparator date={item.content} />;
-            }
+        {isLoading && !chatMessages.length ? (
+          <View style={styles.emptyContainer}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <ThemedText style={styles.emptyTitle}>
+              Loading messages...
+            </ThemedText>
+          </View>
+        ) : chatMessages.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <MaterialIcons
+              name="chat-bubble-outline"
+              size={80}
+              color={colors.tabIconDefault}
+            />
+            <ThemedText style={styles.emptyTitle}>No messages yet</ThemedText>
+            <ThemedText style={styles.emptySubtitle}>
+              Start a conversation by typing a message below
+            </ThemedText>
+          </View>
+        ) : (
+          <FlatList
+            ref={flatListRef}
+            data={chatMessages}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => {
+              // If this is a date separator, render the DateSeparator component
+              if (item.isDateSeparator) {
+                return <DateSeparator date={item.content} />;
+              }
 
-            // Find the message being replied to, if any
-            const replyToMessage = item.replyTo
-              ? chatMessages.find(
-                  (msg) => msg.id === item.replyTo && !msg.isDateSeparator
-                )
-              : null;
+              // Find the message being replied to, if any
+              const replyToMessage = item.replyTo
+                ? chatMessages.find(
+                    (msg) => msg.id === item.replyTo && !msg.isDateSeparator
+                  )
+                : null;
 
-            return (
-              <SwipeableMessage
-                message={item}
-                onReply={handleReply}
-                isOutgoing={item.senderId === "me"}
-                userName={userName}
-              >
-                <MessageBubble
+              return (
+                <SwipeableMessage
                   message={item}
-                  isOutgoing={item.senderId === "me"}
-                  replyToMessage={replyToMessage}
-                  userName={userName}
-                  onImagePress={setSelectedImage}
                   onReply={handleReply}
-                  onShowContextMenu={handleShowContextMenu}
-                  onMessageInfo={handleMessageInfo}
-                  onDeleteMessage={handleDeleteMessage}
-                  selectedMessageId={selectedMessage?.id}
-                  isContextMenuVisible={contextMenuVisible}
-                />
-              </SwipeableMessage>
-            );
-          }}
-          contentContainerStyle={styles.messagesList}
-          onLayout={() => {
-            // Scroll to bottom when the component first renders
-            scrollToBottom(false);
-          }}
-          onContentSizeChange={() => {
-            // Scroll to bottom when content size changes (new messages)
-            scrollToBottom(true);
-          }}
-          // Always maintain scroll position at the end when data changes
-          maintainVisibleContentPosition={{
-            minIndexForVisible: 0,
-            autoscrollToTopThreshold: 10,
-          }}
-          // Improve scrolling performance
-          removeClippedSubviews={true}
-          maxToRenderPerBatch={10}
-          windowSize={20}
-          // Make sure scrolling is smooth
-          scrollEventThrottle={16}
-          // Ensure gesture handling works properly
-          directionalLockEnabled={true}
-          showsVerticalScrollIndicator={true}
-        />
+                  isOutgoing={item.senderId === currentUserId}
+                  userName={userName}
+                >
+                  <MessageBubble
+                    message={item}
+                    isOutgoing={item.senderId === currentUserId}
+                    replyToMessage={replyToMessage}
+                    userName={userName}
+                    onImagePress={setSelectedImage}
+                    onReply={handleReply}
+                    onShowContextMenu={handleShowContextMenu}
+                    onMessageInfo={handleMessageInfo}
+                    onDeleteMessage={handleDeleteMessage}
+                    selectedMessageId={selectedMessage?.id}
+                    isContextMenuVisible={contextMenuVisible}
+                    currentUserId={currentUserId}
+                  />
+                </SwipeableMessage>
+              );
+            }}
+            contentContainerStyle={styles.messagesList}
+            onLayout={() => {
+              // Scroll to bottom when the component first renders
+              scrollToBottom(false);
+            }}
+            onContentSizeChange={() => {
+              // Scroll to bottom when content size changes (new messages)
+              scrollToBottom(true);
+            }}
+            // Always maintain scroll position at the end when data changes
+            maintainVisibleContentPosition={{
+              minIndexForVisible: 0,
+              autoscrollToTopThreshold: 10,
+            }}
+            // Improve scrolling performance
+            removeClippedSubviews={true}
+            maxToRenderPerBatch={10}
+            windowSize={20}
+            // Make sure scrolling is smooth
+            scrollEventThrottle={16}
+            // Ensure gesture handling works properly
+            directionalLockEnabled={true}
+            showsVerticalScrollIndicator={true}
+          />
+        )}
 
         {/* Image Viewer Modal */}
         <Modal
@@ -817,7 +1083,7 @@ export function ChatScreen() {
         <MessageContextMenu
           visible={contextMenuVisible}
           message={selectedMessage}
-          isOutgoing={selectedMessage?.senderId === "me"}
+          isOutgoing={selectedMessage?.senderId === currentUserId}
           position={messagePosition}
           selectedMessageId={selectedMessage?.id}
           onClose={handleCloseContextMenu}
@@ -874,13 +1140,13 @@ export function ChatScreen() {
                 <View
                   style={[styles.replyBar, { backgroundColor: colors.primary }]}
                 />
-                <View style={styles.replyTextContainer}>
+                <View style={styles.replyInputTextContainer}>
                   <ThemedText
                     style={styles.replyingToText}
                     lightColor={colors.primary}
                     darkColor={colors.primary}
                   >
-                    {replyingTo.senderId === "me" ? "You" : userName}
+                    {replyingTo.senderId === currentUserId ? "You" : userName}
                   </ThemedText>
 
                   {replyingTo.type === "text" ? (
@@ -999,6 +1265,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "rgba(0, 0, 0, 0.05)",
   },
+  deletedMessageText: {
+    opacity: 0.8,
+  },
   backButton: {
     marginRight: 16,
   },
@@ -1034,7 +1303,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   messageContainer: {
-    marginBottom: 16,
+    marginBottom: 12, // Slightly reduced for better spacing between messages
     maxWidth: "95%", // Increased from 80% to allow very long messages
   },
   incomingContainer: {
@@ -1046,8 +1315,10 @@ const styles = StyleSheet.create({
   messageBubble: {
     borderRadius: 16,
     padding: 12,
-    minWidth: 80,
+    paddingTop: 10, // Slightly reduced top padding for better spacing with reply
+    minWidth: 60, // Reduced minimum width for very short messages
     // Don't set maxWidth here, it's handled dynamically in getMessageWidth
+    overflow: "hidden", // Prevent content from overflowing
   },
   incomingBubble: {
     borderBottomLeftRadius: 4,
@@ -1145,37 +1416,62 @@ const styles = StyleSheet.create({
   // Reply preview in message bubble
   replyPreviewBubble: {
     flexDirection: "row",
-    borderRadius: 8,
-    padding: 8,
-    marginBottom: 8,
+    borderRadius: 6,
+    padding: 6,
+    paddingVertical: 8,
+    marginBottom: 6, // Reduced space between reply and actual message
+    width: "100%", // Make sure the reply preview takes the full width of the parent bubble
+    alignItems: "stretch", // Stretch items to fill the container height
+    minHeight: 40, // Minimum height for the reply bubble
   },
   replyPreviewBar: {
-    width: 3,
-    borderRadius: 1.5,
+    width: 2.5, // Slightly thinner for a more refined look
+    borderRadius: 4,
     backgroundColor: "rgba(255, 255, 255, 0.5)",
     marginRight: 8,
+    flexShrink: 0, // Prevent the bar from shrinking
+    alignSelf: "stretch", // Make the bar stretch to match content height
+    // Remove minHeight to let it naturally stretch with the container
   },
   replyPreviewContent: {
     flex: 1,
+    flexShrink: 1, // Allow content to shrink if needed
+    overflow: "hidden", // Prevent content from overflowing
+    justifyContent: "center", // Center content vertically
+    minHeight: 24, // Ensure minimum height for content
   },
   replyPreviewName: {
     fontSize: 12,
     fontWeight: "bold",
-    marginBottom: 2,
+    marginBottom: 3, // Increased spacing between name and preview text
+    flexShrink: 0, // Don't allow the name to shrink
+    lineHeight: 14, // Control line height for better vertical spacing
   },
   replyPreviewText: {
     fontSize: 12,
+    flexShrink: 1, // Allow text to shrink if needed
+    opacity: 0.9, // Slightly dimmed for better contrast with the name
+    lineHeight: 16, // Control line height for better vertical spacing
+  },
+  replyTextContainer: {
+    width: "100%", // Take full width of parent
+    flexDirection: "row", // Allow for horizontal layout
+    alignItems: "center", // Center items vertically
+    minHeight: 16, // Minimum height to ensure proper spacing
   },
   replyPreviewRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
+    flexWrap: "nowrap", // Prevent wrapping
+    minHeight: 20, // Minimum height for image preview rows
   },
   replyPreviewThumbnail: {
     width: 20,
     height: 20,
     borderRadius: 3,
     marginRight: 4,
+    flexShrink: 0, // Prevent thumbnail from shrinking
   },
   // Reply container in input box
   replyContainer: {
@@ -1198,7 +1494,7 @@ const styles = StyleSheet.create({
     borderRadius: 1.5,
     marginRight: 10,
   },
-  replyTextContainer: {
+  replyInputTextContainer: {
     flex: 1,
   },
   replyingToText: {
@@ -1243,5 +1539,25 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.5)",
     borderRadius: 20,
     padding: 8,
+  },
+  // Empty state styles
+  emptyContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  emptyTitle: {
+    fontSize: 22,
+    fontWeight: "600",
+    marginTop: 16,
+    textAlign: "center",
+  },
+  emptySubtitle: {
+    fontSize: 16,
+    textAlign: "center",
+    marginTop: 8,
+    opacity: 0.7,
+    paddingHorizontal: 20,
   },
 });

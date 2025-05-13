@@ -11,6 +11,7 @@ import { SettingsScreen } from "@/components/screens/SettingsScreen";
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { Colors } from "@/constants/Colors";
+import { useUser } from "@/contexts/UserContext";
 import { useColorScheme } from "@/hooks/useColorScheme";
 import {
   RegistrationStep,
@@ -75,6 +76,7 @@ function MainTabs() {
 export default function Index() {
   const [redirectPath, setRedirectPath] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const { findUserByPhone } = useUser();
 
   // Check authentication state on app launch
   useEffect(() => {
@@ -122,6 +124,32 @@ export default function Index() {
           }
         } else {
           console.log("User is registered, showing main screen");
+
+          // Try to find the user in Convex by phone number and set the user ID
+          if (authState.phoneNumber && authState.countryCode) {
+            const fullPhoneNumber = `${authState.countryCode}${authState.phoneNumber}`;
+            console.log(
+              "Attempting to find user by phone number:",
+              fullPhoneNumber
+            );
+
+            try {
+              const foundUserId = await findUserByPhone(fullPhoneNumber);
+              if (foundUserId) {
+                console.log("Successfully found and set user ID:", foundUserId);
+              } else {
+                console.warn(
+                  "User is registered in auth-state but not found in Convex database"
+                );
+              }
+            } catch (findUserError) {
+              console.error(
+                "Error finding user by phone number:",
+                findUserError
+              );
+            }
+          }
+
           // User is registered, no redirect needed
           setRedirectPath(null);
         }

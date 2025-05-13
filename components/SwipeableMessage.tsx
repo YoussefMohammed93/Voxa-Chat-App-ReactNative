@@ -1,8 +1,7 @@
-import { Message } from "@/models/mockData";
+import { Message } from "@/types/Message";
 import React, { useCallback, useEffect, useState } from "react";
 import { Platform, StyleSheet, Vibration, View } from "react-native";
 import {
-  GestureHandlerRootView,
   PanGestureHandler,
   PanGestureHandlerGestureEvent,
 } from "react-native-gesture-handler";
@@ -136,7 +135,7 @@ export function SwipeableMessage({
   });
 
   return (
-    <GestureHandlerRootView style={styles.container}>
+    <View style={styles.container}>
       <View
         style={[
           styles.messageWrapper,
@@ -162,7 +161,7 @@ export function SwipeableMessage({
           <Animated.View style={animatedStyle}>{children}</Animated.View>
         </PanGestureHandler>
       </View>
-    </GestureHandlerRootView>
+    </View>
   );
 }
 

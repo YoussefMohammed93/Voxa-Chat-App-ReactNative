@@ -23,10 +23,12 @@ import {
   RegistrationStep,
   updateRegistrationStep,
 } from "@/services/auth-state";
+import { useUser } from "@/contexts/UserContext";
 
 export default function ProfileScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const { phoneNumber, countryCode } = useLocalSearchParams();
+  const { setUserId } = useUser();
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [profileImage, setProfileImage] = useState(null);
@@ -80,6 +82,16 @@ export default function ProfileScreen() {
         lastName: lastName.trim(),
         phoneNumber: fullPhoneNumber,
       });
+
+      // Save the user ID to the UserContext
+      try {
+        console.log("Saving user ID to UserContext:", userId);
+        await setUserId(userId);
+        console.log("Successfully saved user ID to UserContext");
+      } catch (userIdError) {
+        console.error("Failed to save user ID to UserContext:", userIdError);
+        // Continue even if saving user ID fails, but log the error
+      }
 
       // If a profile image was selected, upload it to Convex storage
       if (profileImage) {

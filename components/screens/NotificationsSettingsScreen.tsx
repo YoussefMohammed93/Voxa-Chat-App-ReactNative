@@ -2,50 +2,65 @@ import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { Colors } from "@/constants/Colors";
 import { useColorScheme } from "@/hooks/useColorScheme";
+import { useNotification } from "@/src/contexts/NotificationContext";
+import { NotificationPreferences } from "@/src/services/NotificationManager";
 import { MaterialIcons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { StyleSheet, Switch, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-interface NotificationOption {
-  id: string;
-  title: string;
-  description: string;
-  enabled: boolean;
-}
 
 export function NotificationsSettingsScreen() {
   const colorScheme = useColorScheme() ?? "light";
   const colors = Colors[colorScheme];
   const navigation = useNavigation();
 
-  // Mock notification settings - in a real app, these would come from user preferences
-  const [notificationOptions, setNotificationOptions] = useState<
-    NotificationOption[]
-  >([
-    {
-      id: "message",
-      title: "Message Notifications",
-      description: "Get notified when you receive new messages",
-      enabled: true,
-    },
-    {
-      id: "group",
-      title: "Group Notifications",
-      description: "Get notified about activity in your groups",
-      enabled: true,
-    },
-  ]);
+  // Get notification preferences from context
+  const { preferences, savePreferences } = useNotification();
 
-  const toggleNotification = (id: string) => {
-    setNotificationOptions(
-      notificationOptions.map((option) =>
-        option.id === id
-          ? { ...option, enabled: !option.enabled }
-          : option
-      )
-    );
+  // Local state for notification options
+  const [notificationOptions, setNotificationOptions] = useState({
+    showInAppNotifications: true,
+    playNotificationSounds: true,
+    vibrateOnNotification: true,
+  });
+
+  // Initialize local state from preferences
+  useEffect(() => {
+    setNotificationOptions({
+      showInAppNotifications: preferences.showInAppNotifications,
+      playNotificationSounds: preferences.playNotificationSounds,
+      vibrateOnNotification: preferences.vibrateOnNotification,
+    });
+  }, [preferences]);
+
+  // Check if any notification is enabled
+  const isAnyNotificationEnabled =
+    notificationOptions.showInAppNotifications ||
+    notificationOptions.playNotificationSounds ||
+    notificationOptions.vibrateOnNotification;
+
+  // Toggle all notifications
+  const toggleAllNotifications = (value: boolean) => {
+    const newOptions = {
+      showInAppNotifications: value,
+      playNotificationSounds: value,
+      vibrateOnNotification: value,
+    };
+
+    setNotificationOptions(newOptions);
+    savePreferences(newOptions);
+  };
+
+  // Toggle individual notification option
+  const toggleOption = (key: keyof NotificationPreferences) => {
+    const newOptions = {
+      ...notificationOptions,
+      [key]: !notificationOptions[key],
+    };
+
+    setNotificationOptions(newOptions);
+    savePreferences(newOptions);
   };
 
   return (
@@ -93,15 +108,8 @@ export function NotificationsSettingsScreen() {
               </View>
             </View>
             <Switch
-              value={notificationOptions.some((option) => option.enabled)}
-              onValueChange={(value) => {
-                setNotificationOptions(
-                  notificationOptions.map((option) => ({
-                    ...option,
-                    enabled: value,
-                  }))
-                );
-              }}
+              value={isAnyNotificationEnabled}
+              onValueChange={toggleAllNotifications}
               trackColor={{
                 false: "#767577",
                 true: colorScheme === "dark" ? "#375FFF" : "#385FFF",
@@ -130,34 +138,81 @@ export function NotificationsSettingsScreen() {
               lightColor={Colors.light.tabIconDefault}
               darkColor={Colors.dark.tabIconDefault}
             >
-              NOTIFICATION TYPES
+              NOTIFICATION SETTINGS
             </ThemedText>
 
-            {notificationOptions.map((option) => (
-              <View key={option.id} style={styles.optionItem}>
-                <View style={styles.optionTextContainer}>
-                  <ThemedText style={styles.optionTitle}>
-                    {option.title}
-                  </ThemedText>
-                  <ThemedText
-                    style={styles.optionDescription}
-                    lightColor={Colors.light.tabIconDefault}
-                    darkColor={Colors.dark.tabIconDefault}
-                  >
-                    {option.description}
-                  </ThemedText>
-                </View>
-                <Switch
-                  value={option.enabled}
-                  onValueChange={() => toggleNotification(option.id)}
-                  trackColor={{
-                    false: "#767577",
-                    true: colorScheme === "dark" ? "#375FFF" : "#385FFF",
-                  }}
-                  thumbColor="#FFFFFF"
-                />
+            {/* In-app notifications */}
+            <View style={styles.optionItem}>
+              <View style={styles.optionTextContainer}>
+                <ThemedText style={styles.optionTitle}>
+                  In-app Notifications
+                </ThemedText>
+                <ThemedText
+                  style={styles.optionDescription}
+                  lightColor={Colors.light.tabIconDefault}
+                  darkColor={Colors.dark.tabIconDefault}
+                >
+                  Show notifications while using the app
+                </ThemedText>
               </View>
-            ))}
+              <Switch
+                value={notificationOptions.showInAppNotifications}
+                onValueChange={() => toggleOption("showInAppNotifications")}
+                trackColor={{
+                  false: "#767577",
+                  true: colorScheme === "dark" ? "#375FFF" : "#385FFF",
+                }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+
+            {/* Sound notifications */}
+            <View style={styles.optionItem}>
+              <View style={styles.optionTextContainer}>
+                <ThemedText style={styles.optionTitle}>
+                  Notification Sounds
+                </ThemedText>
+                <ThemedText
+                  style={styles.optionDescription}
+                  lightColor={Colors.light.tabIconDefault}
+                  darkColor={Colors.dark.tabIconDefault}
+                >
+                  Play sounds for new notifications
+                </ThemedText>
+              </View>
+              <Switch
+                value={notificationOptions.playNotificationSounds}
+                onValueChange={() => toggleOption("playNotificationSounds")}
+                trackColor={{
+                  false: "#767577",
+                  true: colorScheme === "dark" ? "#375FFF" : "#385FFF",
+                }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+
+            {/* Vibration notifications */}
+            <View style={[styles.optionItem, { borderBottomWidth: 0 }]}>
+              <View style={styles.optionTextContainer}>
+                <ThemedText style={styles.optionTitle}>Vibration</ThemedText>
+                <ThemedText
+                  style={styles.optionDescription}
+                  lightColor={Colors.light.tabIconDefault}
+                  darkColor={Colors.dark.tabIconDefault}
+                >
+                  Vibrate when receiving notifications
+                </ThemedText>
+              </View>
+              <Switch
+                value={notificationOptions.vibrateOnNotification}
+                onValueChange={() => toggleOption("vibrateOnNotification")}
+                trackColor={{
+                  false: "#767577",
+                  true: colorScheme === "dark" ? "#375FFF" : "#385FFF",
+                }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
           </View>
         </View>
       </SafeAreaView>
